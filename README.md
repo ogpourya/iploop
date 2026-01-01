@@ -33,9 +33,13 @@ curl --socks5 localhost:33333 https://icanhazip.com
 | `-strategy` | `random` | `random` or `sequential` |
 | `-skip-dead` | `false` | Skip failing proxies |
 | `-justdoit` | `false` | Keep retrying until success |
-| `-trust-proxy` | `true` | Skip TLS verification for HTTPS proxies |
+| `-trust-proxy` | `true` | Trust upstream proxy TLS certificates (HTTPS proxies only) |
 | `-metrics` | `true` | Terminal metrics display |
 | `-v` | `false` | Verbose output |
+
+### TLS Note
+
+The `-trust-proxy` flag controls TLS verification when connecting to HTTPS proxy servers (e.g., `https://proxy:8080`). HTTP proxies don't use TLS for the proxy connection itself, so this flag doesn't apply to them. Destination TLS (e.g., when you curl an HTTPS site) is handled end-to-end by your client, not by iploop.
 
 ## Supported Proxies
 
