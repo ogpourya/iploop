@@ -94,7 +94,7 @@ func TestRotatorSkipDead(t *testing.T) {
 	}
 }
 
-func TestRotatorAllDeadResurrect(t *testing.T) {
+func TestRotatorAllDeadError(t *testing.T) {
 	r := NewRotator(RotationSequential, true)
 
 	r.LoadFromStrings([]string{
@@ -104,12 +104,30 @@ func TestRotatorAllDeadResurrect(t *testing.T) {
 	p1, _ := r.Next()
 	r.MarkDead(p1)
 
-	p2, err := r.Next()
-	if err != nil {
-		t.Errorf("should not error when all dead: %v", err)
+	_, err := r.Next()
+	if err != ErrAllProxiesDead {
+		t.Errorf("should return ErrAllProxiesDead, got: %v", err)
 	}
-	if p2 == nil {
-		t.Error("should return proxy after resurrection")
+}
+
+func TestRotatorAliveCount(t *testing.T) {
+	r := NewRotator(RotationSequential, true)
+
+	r.LoadFromStrings([]string{
+		"http://localhost:8080",
+		"http://localhost:8081",
+		"http://localhost:8082",
+	})
+
+	if r.AliveCount() != 3 {
+		t.Errorf("AliveCount() = %d, want 3", r.AliveCount())
+	}
+
+	p1, _ := r.Next()
+	r.MarkDead(p1)
+
+	if r.AliveCount() != 2 {
+		t.Errorf("AliveCount() = %d, want 2", r.AliveCount())
 	}
 }
 

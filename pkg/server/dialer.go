@@ -309,6 +309,9 @@ func (d *Dialer) consumeBoundAddr(conn net.Conn, atyp byte) error {
 }
 
 func (d *Dialer) socks5Auth(conn net.Conn, user, pass string) error {
+	if len(user) > 255 || len(pass) > 255 {
+		return fmt.Errorf("username or password too long")
+	}
 	req := make([]byte, 3+len(user)+len(pass))
 	req[0] = 0x01
 	req[1] = byte(len(user))

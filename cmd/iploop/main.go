@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.NewServer(rotator, cfg.TrustProxy)
+	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.JustDoIt)
 	if err := srv.Listen(cfg.ListenAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)
@@ -43,23 +43,24 @@ func main() {
 
 	var display *metrics.Display
 	if cfg.MetricsEnabled {
-		display = metrics.NewDisplay(rotator, srv.Stats())
+		onAllDead := func() {
+			if cfg.SkipDead {
+				fmt.Print("\033[?25h")
+				fmt.Fprintf(os.Stderr, "\nAll proxies are dead, exiting\n")
+				srv.Close()
+				os.Exit(1)
+			}
+		}
+		display = metrics.NewDisplay(rotator, srv.Stats(), onAllDead)
 		display.Start()
 	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigCh
-		if display != nil {
-			display.Stop()
-		}
-		srv.Close()
-	}()
-
-	if err := srv.Serve(); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		os.Exit(1)
+	<-sigCh
+	if display != nil {
+		display.Stop()
 	}
+	srv.Close()
 }

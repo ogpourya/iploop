@@ -56,8 +56,13 @@ func NewProxy(rawURL string) (*Proxy, error) {
 		return nil, fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
+	host := u.Hostname()
+	if host == "" {
+		return nil, fmt.Errorf("missing hostname")
+	}
+
 	p := &Proxy{
-		Host: u.Hostname(),
+		Host: host,
 		Port: u.Port(),
 	}
 	p.alive.Store(true)

@@ -26,7 +26,6 @@ const (
 	replyHostUnreach = 0x04
 	replyCmdNotSupp  = 0x07
 	replyAddrNotSupp = 0x08
-	relayTimeout     = 5 * time.Minute
 )
 
 type Stats struct {
@@ -41,6 +40,7 @@ type Server struct {
 	rotator   *proxy.Rotator
 	dialer    *Dialer
 	stats     *Stats
+	justDoIt  bool
 	bufPool   sync.Pool
 	handshake sync.Pool
 	ctx       context.Context
@@ -48,12 +48,13 @@ type Server struct {
 	wg        sync.WaitGroup
 }
 
-func NewServer(rotator *proxy.Rotator, trustProxy bool) *Server {
+func NewServer(rotator *proxy.Rotator, trustProxy bool, justDoIt bool) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		rotator: rotator,
-		dialer:  NewDialer(trustProxy),
-		stats:   &Stats{},
+		rotator:  rotator,
+		dialer:   NewDialer(trustProxy),
+		stats:    &Stats{},
+		justDoIt: justDoIt,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 32*1024)
@@ -138,6 +139,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	conn.SetDeadline(time.Time{})
 	s.stats.TotalRequests.Add(1)
 
+	if s.justDoIt {
+		s.handleJustDoIt(conn, target)
+	} else {
+		s.handleNormal(conn, target)
+	}
+}
+
+func (s *Server) handleNormal(conn net.Conn, target string) {
 	start := time.Now()
 	targetConn, usedProxy, err := s.connectToTarget(target)
 	latency := time.Since(start)
@@ -168,6 +177,52 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.relay(conn, targetConn)
 }
 
+func (s *Server) handleJustDoIt(conn net.Conn, target string) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.sendReply(conn, replyGeneralFail, nil)
+			return
+		default:
+		}
+
+		start := time.Now()
+		targetConn, usedProxy, err := s.connectToTarget(target)
+		latency := time.Since(start)
+
+		if err != nil {
+			if usedProxy != nil {
+				usedProxy.RecordFailure()
+			}
+			if errors.Is(err, proxy.ErrAllProxiesDead) {
+				s.stats.FailedRequests.Add(1)
+				s.sendReply(conn, replyHostUnreach, nil)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		s.stats.SuccessRequests.Add(1)
+		if usedProxy != nil {
+			usedProxy.RecordRequest(latency)
+		}
+
+		var bindAddr *net.TCPAddr
+		if addr, ok := targetConn.LocalAddr().(*net.TCPAddr); ok {
+			bindAddr = addr
+		}
+		if err := s.sendReply(conn, replySuccess, bindAddr); err != nil {
+			targetConn.Close()
+			return
+		}
+
+		s.relay(conn, targetConn)
+		targetConn.Close()
+		return
+	}
+}
+
 func (s *Server) negotiate(conn net.Conn) error {
 	bufp := s.handshake.Get().(*[]byte)
 	defer s.handshake.Put(bufp)
@@ -181,7 +236,7 @@ func (s *Server) negotiate(conn net.Conn) error {
 	}
 	nmethods := int(buf[1])
 	if nmethods > 255 {
-		return fmt.Errorf("too many methods")
+		return fmt.Errorf("invalid nmethods")
 	}
 	if _, err := io.ReadFull(conn, buf[:nmethods]); err != nil {
 		return err
@@ -280,24 +335,39 @@ func (s *Server) connectToTarget(target string) (net.Conn, *proxy.Proxy, error) 
 		return nil, nil, err
 	}
 
-	maxRetries := 3
+	maxRetries := s.rotator.Count()
+	if maxRetries > 10 {
+		maxRetries = 10
+	}
+	if maxRetries < 3 {
+		maxRetries = 3
+	}
+
 	var lastErr error
-	var failedProxy *proxy.Proxy
+	tried := make(map[*proxy.Proxy]bool, maxRetries)
 
 	for i := 0; i < maxRetries; i++ {
+		if tried[p] {
+			p, err = s.rotator.Next()
+			if err != nil {
+				return nil, nil, lastErr
+			}
+			continue
+		}
+		tried[p] = true
+
 		conn, err := s.dialer.Dial(p, target)
 		if err == nil {
 			return conn, p, nil
 		}
 		lastErr = err
-		failedProxy = p
 		s.rotator.MarkDead(p)
 		p, err = s.rotator.Next()
 		if err != nil {
-			return nil, failedProxy, lastErr
+			return nil, nil, lastErr
 		}
 	}
-	return nil, failedProxy, lastErr
+	return nil, nil, lastErr
 }
 
 func (s *Server) relay(client, target net.Conn) {
@@ -306,18 +376,15 @@ func (s *Server) relay(client, target net.Conn) {
 	defer s.bufPool.Put(buf1)
 	defer s.bufPool.Put(buf2)
 
-	deadline := time.Now().Add(relayTimeout)
-	client.SetDeadline(deadline)
-	target.SetDeadline(deadline)
-
-	done := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	go func() {
 		io.CopyBuffer(target, client, *buf1)
 		if tc, ok := target.(interface{ CloseWrite() error }); ok {
 			tc.CloseWrite()
 		}
-		done <- struct{}{}
+		wg.Done()
 	}()
 
 	go func() {
@@ -325,9 +392,8 @@ func (s *Server) relay(client, target net.Conn) {
 		if tc, ok := client.(interface{ CloseWrite() error }); ok {
 			tc.CloseWrite()
 		}
-		done <- struct{}{}
+		wg.Done()
 	}()
 
-	<-done
-	<-done
+	wg.Wait()
 }

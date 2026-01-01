@@ -15,6 +15,7 @@ type Config struct {
 	Strategy       proxy.RotationStrategy
 	SkipDead       bool
 	TrustProxy     bool
+	JustDoIt       bool
 	MetricsEnabled bool
 	Verbose        bool
 }
@@ -30,6 +31,7 @@ func Parse() *Config {
 	flag.StringVar(&strategy, "strategy", "random", "Rotation strategy: random or sequential")
 	flag.BoolVar(&cfg.SkipDead, "skip-dead", false, "Skip dead proxies (default: keep using them)")
 	flag.BoolVar(&cfg.TrustProxy, "trust-proxy", true, "Trust HTTPS proxy certificates (skip TLS verification)")
+	flag.BoolVar(&cfg.JustDoIt, "justdoit", false, "Keep retrying until a proxy succeeds (never give up)")
 	flag.BoolVar(&cfg.MetricsEnabled, "metrics", true, "Enable terminal metrics")
 	flag.BoolVar(&cfg.Verbose, "v", false, "Verbose logging")
 

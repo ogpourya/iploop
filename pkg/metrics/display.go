@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,18 +12,21 @@ import (
 )
 
 type Display struct {
-	rotator *proxy.Rotator
-	stats   *server.Stats
-	enabled atomic.Bool
-	stop    chan struct{}
-	once    sync.Once
+	rotator   *proxy.Rotator
+	stats     *server.Stats
+	enabled   atomic.Bool
+	stop      chan struct{}
+	once      sync.Once
+	onDead    func()
+	deadFired atomic.Bool
 }
 
-func NewDisplay(rotator *proxy.Rotator, stats *server.Stats) *Display {
+func NewDisplay(rotator *proxy.Rotator, stats *server.Stats, onAllDead func()) *Display {
 	return &Display{
 		rotator: rotator,
 		stats:   stats,
 		stop:    make(chan struct{}),
+		onDead:  onAllDead,
 	}
 }
 
@@ -64,29 +66,16 @@ func (d *Display) render() {
 	success := d.stats.SuccessRequests.Load()
 	failed := d.stats.FailedRequests.Load()
 	active := d.stats.ActiveConns.Load()
+	alive := d.rotator.AliveCount()
+	totalProxies := d.rotator.Count()
 
-	proxies := d.rotator.GetProxies()
-
-	var b strings.Builder
-	b.Grow(256)
-	for i, p := range proxies {
-		if i > 0 {
-			b.WriteString(" | ")
-		}
-		reqs, fails, latency := p.Stats()
-		status := "+"
-		if !p.IsAlive() {
-			status = "-"
-		}
-		fmt.Fprintf(&b, "%s%s[%d/%d,%.0fms]", status, p.String(), reqs, fails, float64(latency.Milliseconds()))
+	if alive == 0 && d.onDead != nil && !d.deadFired.Swap(true) {
+		d.onDead()
+		return
 	}
 
-	line := fmt.Sprintf("\r\033[K[iploop] reqs:%d ok:%d fail:%d active:%d | %s",
-		total, success, failed, active, b.String())
-
-	if len(line) > 120 {
-		line = line[:117] + "..."
-	}
+	line := fmt.Sprintf("\r\033[K[iploop] reqs:%d ok:%d fail:%d active:%d proxies:%d/%d",
+		total, success, failed, active, alive, totalProxies)
 
 	os.Stdout.WriteString(line)
 }

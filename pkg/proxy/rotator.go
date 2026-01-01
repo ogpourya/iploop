@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"strings"
 	"sync"
 )
+
+var ErrAllProxiesDead = errors.New("all proxies are dead")
 
 type RotationStrategy int
 
@@ -32,6 +35,7 @@ func ParseRotationStrategy(s string) RotationStrategy {
 
 type Rotator struct {
 	proxies    []*Proxy
+	seen       map[string]bool
 	strategy   RotationStrategy
 	skipDead   bool
 	mu         sync.Mutex
@@ -44,6 +48,7 @@ type Rotator struct {
 func NewRotator(strategy RotationStrategy, skipDead bool) *Rotator {
 	return &Rotator{
 		proxies:   make([]*Proxy, 0, 64),
+		seen:      make(map[string]bool),
 		strategy:  strategy,
 		skipDead:  skipDead,
 		poolCache: make([]*Proxy, 0, 64),
@@ -51,7 +56,13 @@ func NewRotator(strategy RotationStrategy, skipDead bool) *Rotator {
 }
 
 func (r *Rotator) AddProxy(p *Proxy) {
+	key := p.String()
 	r.mu.Lock()
+	if r.seen[key] {
+		r.mu.Unlock()
+		return
+	}
+	r.seen[key] = true
 	r.proxies = append(r.proxies, p)
 	r.poolCache = r.poolCache[:0]
 	r.shuffled = nil
@@ -68,7 +79,7 @@ func (r *Rotator) LoadFromFile(path string) error {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
+		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
 		p, err := NewProxy(line)
@@ -98,17 +109,21 @@ func (r *Rotator) Count() int {
 	return n
 }
 
-func (r *Rotator) GetProxies() []*Proxy {
+func (r *Rotator) AliveCount() int {
 	r.mu.Lock()
-	result := make([]*Proxy, len(r.proxies))
-	copy(result, r.proxies)
-	r.mu.Unlock()
-	return result
+	defer r.mu.Unlock()
+	count := 0
+	for _, p := range r.proxies {
+		if p.IsAlive() {
+			count++
+		}
+	}
+	return count
 }
 
-func (r *Rotator) getPool() []*Proxy {
+func (r *Rotator) getPool() ([]*Proxy, error) {
 	if !r.skipDead {
-		return r.proxies
+		return r.proxies, nil
 	}
 
 	r.poolCache = r.poolCache[:0]
@@ -119,12 +134,9 @@ func (r *Rotator) getPool() []*Proxy {
 	}
 
 	if len(r.poolCache) == 0 {
-		for _, p := range r.proxies {
-			p.MarkAlive()
-		}
-		return r.proxies
+		return nil, ErrAllProxiesDead
 	}
-	return r.poolCache
+	return r.poolCache, nil
 }
 
 func (r *Rotator) Next() (*Proxy, error) {
@@ -135,7 +147,11 @@ func (r *Rotator) Next() (*Proxy, error) {
 		return nil, fmt.Errorf("no proxies available")
 	}
 
-	pool := r.getPool()
+	pool, err := r.getPool()
+	if err != nil {
+		return nil, err
+	}
+
 	var proxy *Proxy
 
 	switch r.strategy {
