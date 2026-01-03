@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ type Config struct {
 	ProxyList      []string
 	Strategy       proxy.RotationStrategy
 	SkipDead       bool
+	RequestsPer    int // 0 means rotate every request, -1 means 'auto' (don't rotate if alive)
 	TrustProxy     bool
 	JustDoIt       bool
 	MetricsEnabled bool
@@ -28,8 +30,10 @@ func Parse() *Config {
 	var proxyList string
 	flag.StringVar(&proxyList, "proxies", "", "Comma-separated proxy list")
 	var strategy string
-	flag.StringVar(&strategy, "strategy", "random", "Rotation strategy: random or sequential")
+	flag.StringVar(&strategy, "strategy", "sequential", "Rotation strategy: random or sequential")
 	flag.BoolVar(&cfg.SkipDead, "skip-dead", false, "Skip dead proxies (default: keep using them)")
+	var requestsPer string
+	flag.StringVar(&requestsPer, "requests-per-proxy", "1", "Number of requests per proxy before rotation (default: 1, 'auto' to stay on same proxy as long as it is alive)")
 	flag.BoolVar(&cfg.TrustProxy, "trust-proxy", true, "Trust HTTPS proxy certificates (skip TLS verification)")
 	flag.BoolVar(&cfg.JustDoIt, "justdoit", false, "Keep retrying until a proxy succeeds (never give up)")
 	flag.BoolVar(&cfg.MetricsEnabled, "metrics", true, "Enable terminal metrics")
@@ -42,6 +46,15 @@ func Parse() *Config {
 	}
 
 	cfg.Strategy = proxy.ParseRotationStrategy(strategy)
+
+	if requestsPer == "auto" {
+		cfg.RequestsPer = -1
+	} else {
+		fmt.Sscanf(requestsPer, "%d", &cfg.RequestsPer)
+		if cfg.RequestsPer < 1 {
+			cfg.RequestsPer = 1
+		}
+	}
 
 	if cfg.ProxyFile == "" {
 		cfg.ProxyFile = os.Getenv("IPLOOP_PROXY_FILE")

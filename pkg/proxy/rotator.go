@@ -34,24 +34,28 @@ func ParseRotationStrategy(s string) RotationStrategy {
 }
 
 type Rotator struct {
-	proxies    []*Proxy
-	seen       map[string]bool
-	strategy   RotationStrategy
-	skipDead   bool
-	mu         sync.Mutex
-	seqIndex   int
-	shuffled   []*Proxy
-	shuffleIdx int
-	poolCache  []*Proxy
+	proxies     []*Proxy
+	seen        map[string]bool
+	strategy    RotationStrategy
+	skipDead    bool
+	mu          sync.Mutex
+	requestsPer int
+	current     *Proxy
+	counter     int
+	seqIndex    int
+	shuffled    []*Proxy
+	shuffleIdx  int
+	poolCache   []*Proxy
 }
 
-func NewRotator(strategy RotationStrategy, skipDead bool) *Rotator {
+func NewRotator(strategy RotationStrategy, skipDead bool, requestsPer int) *Rotator {
 	return &Rotator{
-		proxies:   make([]*Proxy, 0, 64),
-		seen:      make(map[string]bool),
-		strategy:  strategy,
-		skipDead:  skipDead,
-		poolCache: make([]*Proxy, 0, 64),
+		proxies:     make([]*Proxy, 0, 64),
+		seen:        make(map[string]bool),
+		strategy:    strategy,
+		skipDead:    skipDead,
+		requestsPer: requestsPer,
+		poolCache:   make([]*Proxy, 0, 64),
 	}
 }
 
@@ -147,6 +151,14 @@ func (r *Rotator) Next() (*Proxy, error) {
 		return nil, fmt.Errorf("no proxies available")
 	}
 
+	// Stay on current proxy if requested
+	if r.current != nil && (r.requestsPer == -1 || r.counter < r.requestsPer) {
+		if !r.skipDead || r.current.IsAlive() {
+			r.counter++
+			return r.current, nil
+		}
+	}
+
 	pool, err := r.getPool()
 	if err != nil {
 		return nil, err
@@ -181,6 +193,8 @@ func (r *Rotator) Next() (*Proxy, error) {
 		r.shuffleIdx++
 	}
 
+	r.current = proxy
+	r.counter = 1
 	return proxy, nil
 }
 

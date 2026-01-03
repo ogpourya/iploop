@@ -5,7 +5,7 @@ import (
 )
 
 func TestRotator(t *testing.T) {
-	r := NewRotator(RotationSequential, false)
+	r := NewRotator(RotationSequential, false, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -35,7 +35,7 @@ func TestRotator(t *testing.T) {
 }
 
 func TestRotatorRandom(t *testing.T) {
-	r := NewRotator(RotationRandom, false)
+	r := NewRotator(RotationRandom, false, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -56,7 +56,7 @@ func TestRotatorRandom(t *testing.T) {
 }
 
 func TestRotatorKeepDead(t *testing.T) {
-	r := NewRotator(RotationSequential, false)
+	r := NewRotator(RotationSequential, false, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -78,7 +78,7 @@ func TestRotatorKeepDead(t *testing.T) {
 }
 
 func TestRotatorSkipDead(t *testing.T) {
-	r := NewRotator(RotationSequential, true)
+	r := NewRotator(RotationSequential, true, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -95,7 +95,7 @@ func TestRotatorSkipDead(t *testing.T) {
 }
 
 func TestRotatorAllDeadError(t *testing.T) {
-	r := NewRotator(RotationSequential, true)
+	r := NewRotator(RotationSequential, true, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -111,7 +111,7 @@ func TestRotatorAllDeadError(t *testing.T) {
 }
 
 func TestRotatorAliveCount(t *testing.T) {
-	r := NewRotator(RotationSequential, true)
+	r := NewRotator(RotationSequential, true, 1)
 
 	r.LoadFromStrings([]string{
 		"http://localhost:8080",
@@ -143,5 +143,44 @@ func TestRotationStrategy(t *testing.T) {
 	}
 	if ParseRotationStrategy("unknown") != RotationRandom {
 		t.Error("should default to random")
+	}
+}
+
+func TestRotatorRequestsPer(t *testing.T) {
+	r := NewRotator(RotationSequential, false, 2)
+	r.LoadFromStrings([]string{
+		"http://localhost:8080",
+		"http://localhost:8081",
+	})
+
+	p1, _ := r.Next()
+	p2, _ := r.Next()
+	p3, _ := r.Next()
+
+	if p1.Port != "8080" || p2.Port != "8080" {
+		t.Errorf("expected same proxy for first 2 requests, got %s then %s", p1.Port, p2.Port)
+	}
+	if p3.Port != "8081" {
+		t.Errorf("expected rotation on 3rd request, got %s", p3.Port)
+	}
+}
+
+func TestRotatorAuto(t *testing.T) {
+	r := NewRotator(RotationSequential, true, -1) // auto
+	r.LoadFromStrings([]string{
+		"http://localhost:8080",
+		"http://localhost:8081",
+	})
+
+	p1, _ := r.Next()
+	p2, _ := r.Next()
+	if p1.Port != "8080" || p2.Port != "8080" {
+		t.Error("auto should stay on same proxy")
+	}
+
+	r.MarkDead(p1)
+	p3, _ := r.Next()
+	if p3.Port != "8081" {
+		t.Errorf("auto should rotate when current is dead, got %s", p3.Port)
 	}
 }

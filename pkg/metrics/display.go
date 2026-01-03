@@ -43,7 +43,7 @@ func (d *Display) Stop() {
 }
 
 func (d *Display) run() {
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	fmt.Print("\033[?25l")
@@ -69,7 +69,7 @@ func (d *Display) render() {
 	alive := d.rotator.AliveCount()
 	totalProxies := d.rotator.Count()
 
-	if alive == 0 && d.onDead != nil && !d.deadFired.Swap(true) {
+	if alive == 0 && totalProxies > 0 && d.onDead != nil && !d.deadFired.Swap(true) {
 		d.onDead()
 		return
 	}

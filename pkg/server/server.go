@@ -159,7 +159,6 @@ func (s *Server) handleNormal(conn net.Conn, target string) {
 		s.sendReply(conn, replyHostUnreach, nil)
 		return
 	}
-	defer targetConn.Close()
 
 	s.stats.SuccessRequests.Add(1)
 	if usedProxy != nil {
@@ -178,6 +177,10 @@ func (s *Server) handleNormal(conn net.Conn, target string) {
 }
 
 func (s *Server) handleJustDoIt(conn net.Conn, target string) {
+	var targetConn net.Conn
+	var usedProxy *proxy.Proxy
+	var err error
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -187,7 +190,7 @@ func (s *Server) handleJustDoIt(conn net.Conn, target string) {
 		}
 
 		start := time.Now()
-		targetConn, usedProxy, err := s.connectToTarget(target)
+		targetConn, usedProxy, err = s.connectToTarget(target)
 		latency := time.Since(start)
 
 		if err != nil {
@@ -217,10 +220,10 @@ func (s *Server) handleJustDoIt(conn net.Conn, target string) {
 			return
 		}
 
-		s.relay(conn, targetConn)
-		targetConn.Close()
-		return
+		break
 	}
+
+	s.relay(conn, targetConn)
 }
 
 func (s *Server) negotiate(conn net.Conn) error {

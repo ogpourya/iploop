@@ -15,7 +15,7 @@ import (
 func main() {
 	cfg := config.Parse()
 
-	rotator := proxy.NewRotator(cfg.Strategy, cfg.SkipDead)
+	rotator := proxy.NewRotator(cfg.Strategy, cfg.SkipDead, cfg.RequestsPer)
 
 	if cfg.ProxyFile != "" {
 		if err := rotator.LoadFromFile(cfg.ProxyFile); err != nil {
@@ -37,6 +37,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)
 	}
+	go srv.Serve()
 
 	fmt.Printf("iploop listening on %s with %d proxies (%s rotation)\n",
 		srv.Addr(), rotator.Count(), cfg.Strategy)

@@ -27,16 +27,23 @@ func NewDialer(trustProxy bool) *Dialer {
 }
 
 func (d *Dialer) Dial(p *proxy.Proxy, target string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: d.timeout}
+	conn, err := dialer.Dial("tcp", p.Address())
+	if err != nil {
+		return nil, err
+	}
+
 	switch p.Type {
 	case proxy.ProxyTypeHTTP:
-		return d.dialHTTP(p, target)
+		return d.doHTTPConnect(conn, p, target)
 	case proxy.ProxyTypeHTTPS:
-		return d.dialHTTPS(p, target)
+		return d.dialHTTPS(conn, p, target)
 	case proxy.ProxyTypeSOCKS4:
-		return d.dialSOCKS4(p, target)
+		return d.dialSOCKS4(conn, p, target)
 	case proxy.ProxyTypeSOCKS5:
-		return d.dialSOCKS5(p, target)
+		return d.dialSOCKS5(conn, p, target)
 	default:
+		conn.Close()
 		return nil, fmt.Errorf("unsupported proxy type")
 	}
 }
@@ -51,19 +58,15 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func (d *Dialer) dialHTTP(p *proxy.Proxy, target string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", p.Address(), d.timeout)
+	dialer := net.Dialer{Timeout: d.timeout}
+	conn, err := dialer.Dial("tcp", p.Address())
 	if err != nil {
 		return nil, err
 	}
 	return d.doHTTPConnect(conn, p, target)
 }
 
-func (d *Dialer) dialHTTPS(p *proxy.Proxy, target string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", p.Address(), d.timeout)
-	if err != nil {
-		return nil, err
-	}
-
+func (d *Dialer) dialHTTPS(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
 	tlsConfig := &tls.Config{
 		ServerName:         p.Host,
 		InsecureSkipVerify: d.trustProxy,
@@ -111,12 +114,7 @@ func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (ne
 	return &bufferedConn{Conn: conn, r: br}, nil
 }
 
-func (d *Dialer) dialSOCKS4(p *proxy.Proxy, target string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", p.Address(), d.timeout)
-	if err != nil {
-		return nil, err
-	}
-
+func (d *Dialer) dialSOCKS4(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
 	host, portStr, err := net.SplitHostPort(target)
 	if err != nil {
 		conn.Close()
@@ -178,12 +176,7 @@ func (d *Dialer) dialSOCKS4(p *proxy.Proxy, target string) (net.Conn, error) {
 	return conn, nil
 }
 
-func (d *Dialer) dialSOCKS5(p *proxy.Proxy, target string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", p.Address(), d.timeout)
-	if err != nil {
-		return nil, err
-	}
-
+func (d *Dialer) dialSOCKS5(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
 	conn.SetDeadline(time.Now().Add(d.timeout))
 
 	var methods []byte
@@ -193,13 +186,13 @@ func (d *Dialer) dialSOCKS5(p *proxy.Proxy, target string) (net.Conn, error) {
 		methods = []byte{0x05, 0x01, 0x00}
 	}
 
-	if _, err = conn.Write(methods); err != nil {
+	if _, err := conn.Write(methods); err != nil {
 		conn.Close()
 		return nil, err
 	}
 
 	var resp [2]byte
-	if _, err = io.ReadFull(conn, resp[:]); err != nil {
+	if _, err := io.ReadFull(conn, resp[:]); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -254,13 +247,13 @@ func (d *Dialer) dialSOCKS5(p *proxy.Proxy, target string) (net.Conn, error) {
 	}
 	req = append(req, byte(port>>8), byte(port))
 
-	if _, err = conn.Write(req); err != nil {
+	if _, err := conn.Write(req); err != nil {
 		conn.Close()
 		return nil, err
 	}
 
 	var hdr [4]byte
-	if _, err = io.ReadFull(conn, hdr[:]); err != nil {
+	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
 		conn.Close()
 		return nil, err
 	}
