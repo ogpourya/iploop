@@ -30,10 +30,12 @@ curl --socks5 localhost:33333 https://icanhazip.com
 | `-listen` | `:33333` | Listen address |
 | `-proxies` | | Comma-separated proxy list |
 | `-proxy-file` | | Proxy list file (one per line) |
-| `-strategy` | `random` | `random` or `sequential` |
-| `-skip-dead` | `false` | Skip failing proxies |
-| `-justdoit` | `false` | Keep retrying until success |
-| `-trust-proxy` | `true` | Trust upstream proxy TLS certificates (HTTPS proxies only) |
+| `-strategy` | `sequential` | `random` or `sequential` |
+| `-skip-dead` | `false` | Skip failing proxies (default: keep using them) |
+| `-requests-per-proxy` | `1` | Requests per proxy before rotation (`auto` to stay until dead) |
+| `-trust-proxy` | `true` | Trust HTTPS proxy certificates (skip TLS verification) |
+| `-retry-delay` | `100` | Delay in ms between retries |
+| `-dial-timeout` | `5` | Timeout in seconds for proxy connections |
 | `-metrics` | `true` | Terminal metrics display |
 | `-v` | `false` | Verbose output |
 
