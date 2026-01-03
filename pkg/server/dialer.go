@@ -100,7 +100,7 @@ func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (ne
 		fmt.Fprintf(os.Stderr, "Sending HTTP CONNECT to %s for %s\n", p.Address(), target)
 	}
 	start := time.Now()
-	
+
 	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
 	if p.Username != "" {
 		auth := base64.StdEncoding.EncodeToString([]byte(p.Username + ":" + p.Password))

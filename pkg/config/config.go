@@ -34,7 +34,7 @@ func Parse() *Config {
 	flag.StringVar(&strategy, "strategy", "sequential", "Rotation strategy: random or sequential")
 	flag.BoolVar(&cfg.SkipDead, "skip-dead", false, "Skip dead proxies (default: keep using them)")
 	var requestsPer string
-	flag.StringVar(&requestsPer, "requests-per-proxy", "auto", "Number of requests per proxy before rotation (default: auto, '1' to rotate every request)")
+	flag.StringVar(&requestsPer, "requests-per-proxy", "1", "Number of requests per proxy before rotation (default: 1, 'auto' to stay on same proxy as long as it is alive)")
 	flag.BoolVar(&cfg.TrustProxy, "trust-proxy", true, "Trust HTTPS proxy certificates (skip TLS verification)")
 	flag.IntVar(&cfg.RetryDelay, "retry-delay", 100, "Delay in milliseconds between retries")
 	flag.IntVar(&cfg.DialTimeout, "dial-timeout", 5, "Timeout in seconds for proxy connections")

@@ -321,9 +321,9 @@ func (s *Server) connectToTarget(target string) (net.Conn, *proxy.Proxy, error) 
 	}
 
 	type result struct {
-		conn net.Conn
+		conn  net.Conn
 		proxy *proxy.Proxy
-		err error
+		err   error
 	}
 
 	resultCh := make(chan result, len(proxies))
