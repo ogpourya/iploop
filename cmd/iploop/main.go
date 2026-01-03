@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.JustDoIt)
+	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.RetryDelay, cfg.DialTimeout, cfg.Verbose)
 	if err := srv.Listen(cfg.ListenAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)

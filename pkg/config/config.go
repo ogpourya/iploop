@@ -17,7 +17,8 @@ type Config struct {
 	SkipDead       bool
 	RequestsPer    int // 0 means rotate every request, -1 means 'auto' (don't rotate if alive)
 	TrustProxy     bool
-	JustDoIt       bool
+	RetryDelay     int // Milliseconds to wait between retries
+	DialTimeout    int // Seconds for proxy dial timeout
 	MetricsEnabled bool
 	Verbose        bool
 }
@@ -33,9 +34,10 @@ func Parse() *Config {
 	flag.StringVar(&strategy, "strategy", "sequential", "Rotation strategy: random or sequential")
 	flag.BoolVar(&cfg.SkipDead, "skip-dead", false, "Skip dead proxies (default: keep using them)")
 	var requestsPer string
-	flag.StringVar(&requestsPer, "requests-per-proxy", "1", "Number of requests per proxy before rotation (default: 1, 'auto' to stay on same proxy as long as it is alive)")
+	flag.StringVar(&requestsPer, "requests-per-proxy", "auto", "Number of requests per proxy before rotation (default: auto, '1' to rotate every request)")
 	flag.BoolVar(&cfg.TrustProxy, "trust-proxy", true, "Trust HTTPS proxy certificates (skip TLS verification)")
-	flag.BoolVar(&cfg.JustDoIt, "justdoit", false, "Keep retrying until a proxy succeeds (never give up)")
+	flag.IntVar(&cfg.RetryDelay, "retry-delay", 100, "Delay in milliseconds between retries")
+	flag.IntVar(&cfg.DialTimeout, "dial-timeout", 5, "Timeout in seconds for proxy connections")
 	flag.BoolVar(&cfg.MetricsEnabled, "metrics", true, "Enable terminal metrics")
 	flag.BoolVar(&cfg.Verbose, "v", false, "Verbose logging")
 

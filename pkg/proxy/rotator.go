@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -88,6 +88,7 @@ func (r *Rotator) LoadFromFile(path string) error {
 		}
 		p, err := NewProxy(line)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid proxy URL: %s: %v\n", line, err)
 			continue
 		}
 		r.AddProxy(p)
@@ -99,6 +100,7 @@ func (r *Rotator) LoadFromStrings(urls []string) error {
 	for _, u := range urls {
 		p, err := NewProxy(u)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid proxy URL: %s: %v\n", u, err)
 			continue
 		}
 		r.AddProxy(p)

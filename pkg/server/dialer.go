@@ -2,13 +2,16 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ogpourya/iploop/pkg/proxy"
@@ -17,18 +20,27 @@ import (
 type Dialer struct {
 	timeout    time.Duration
 	trustProxy bool
+	verbose    bool
 }
 
-func NewDialer(trustProxy bool) *Dialer {
+func NewDialer(trustProxy bool, timeout time.Duration, verbose bool) *Dialer {
 	return &Dialer{
-		timeout:    10 * time.Second,
+		timeout:    timeout,
 		trustProxy: trustProxy,
+		verbose:    verbose,
 	}
 }
 
-func (d *Dialer) Dial(p *proxy.Proxy, target string) (net.Conn, error) {
-	dialer := net.Dialer{Timeout: d.timeout}
-	conn, err := dialer.Dial("tcp", p.Address())
+func (d *Dialer) Dial(ctx context.Context, p *proxy.Proxy, target string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: d.timeout}
+	if d.verbose {
+		fmt.Fprintf(os.Stderr, "Dialing proxy (tcp) %s\n", p.Address())
+	}
+	start := time.Now()
+	conn, err := dialer.DialContext(ctx, "tcp", p.Address())
+	if d.verbose {
+		fmt.Fprintf(os.Stderr, "Dial proxy (tcp) %s took %v (err=%v)\n", p.Address(), time.Since(start), err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +70,7 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func (d *Dialer) dialHTTP(p *proxy.Proxy, target string) (net.Conn, error) {
-	dialer := net.Dialer{Timeout: d.timeout}
+	dialer := &net.Dialer{Timeout: d.timeout}
 	conn, err := dialer.Dial("tcp", p.Address())
 	if err != nil {
 		return nil, err
@@ -84,9 +96,15 @@ func (d *Dialer) dialHTTPS(conn net.Conn, p *proxy.Proxy, target string) (net.Co
 }
 
 func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
+	if d.verbose {
+		fmt.Fprintf(os.Stderr, "Sending HTTP CONNECT to %s for %s\n", p.Address(), target)
+	}
+	start := time.Now()
+	
 	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
 	if p.Username != "" {
-		req += "Proxy-Authorization: Basic " + base64Encode(p.Username+":"+p.Password) + "\r\n"
+		auth := base64.StdEncoding.EncodeToString([]byte(p.Username + ":" + p.Password))
+		req += "Proxy-Authorization: Basic " + auth + "\r\n"
 	}
 	req += "\r\n"
 
@@ -96,18 +114,32 @@ func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (ne
 		return nil, err
 	}
 
-	br := bufio.NewReaderSize(conn, 1024)
-	resp, err := http.ReadResponse(br, nil)
+	br := bufio.NewReader(conn)
+	// Manual response parsing to avoid net/http overhead/buffering issues
+	line, err := br.ReadString('\n')
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-
-	if resp.StatusCode != 200 {
+	if !strings.Contains(line, " 200 ") {
 		conn.Close()
-		return nil, fmt.Errorf("HTTP proxy returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP proxy returned: %s", strings.TrimSpace(line))
+	}
+
+	// Read until empty line (end of headers)
+	for {
+		line, err = br.ReadString('\n')
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if line == "\r\n" || line == "\n" {
+			break
+		}
+	}
+
+	if d.verbose {
+		fmt.Fprintf(os.Stderr, "HTTP CONNECT handshake with %s took %v\n", p.Address(), time.Since(start))
 	}
 
 	conn.SetDeadline(time.Time{})
@@ -325,27 +357,4 @@ func (d *Dialer) socks5Auth(conn net.Conn, user, pass string) error {
 		return fmt.Errorf("auth failed")
 	}
 	return nil
-}
-
-func base64Encode(s string) string {
-	const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	data := []byte(s)
-	result := make([]byte, 0, (len(data)+2)/3*4)
-
-	for i := 0; i < len(data); i += 3 {
-		var n uint32
-		rem := len(data) - i
-		switch {
-		case rem >= 3:
-			n = uint32(data[i])<<16 | uint32(data[i+1])<<8 | uint32(data[i+2])
-			result = append(result, alpha[n>>18], alpha[(n>>12)&63], alpha[(n>>6)&63], alpha[n&63])
-		case rem == 2:
-			n = uint32(data[i])<<16 | uint32(data[i+1])<<8
-			result = append(result, alpha[n>>18], alpha[(n>>12)&63], alpha[(n>>6)&63], '=')
-		default:
-			n = uint32(data[i]) << 16
-			result = append(result, alpha[n>>18], alpha[(n>>12)&63], '=', '=')
-		}
-	}
-	return string(result)
 }
