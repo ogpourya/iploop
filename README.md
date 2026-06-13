@@ -1,56 +1,55 @@
 # iploop
 
-Ultra-fast proxy-rotating SOCKS5 server in Go.
+SOCKS5 proxy rotator. Feeds proxies through xray, HTTP, HTTPS, SOCKS4/5 — rotates them per request.
 
-## Install
-
-```bash
+```
 go install github.com/ogpourya/iploop/cmd/iploop@latest
 ```
 
-## Usage
+## Examples
 
 ```bash
-iploop -proxies "http://proxy1:8080,socks5://proxy2:1080"
-```
+# Rotate through traditional proxies
+iploop -proxies "http://p1:8080,socks5://p2:1080"
 
-```bash
-iploop -proxy-file proxies.txt -strategy sequential
-```
+# Rotate through xray nodes (auto-detected from share links)
+iploop -proxies "vless://uuid@host:443?type=ws&security=tls&sni=x.com&path=/ws"
 
-Test:
-```bash
+# Mix xray and regular proxies
+iploop -proxies "vless://u@a:443?type=ws&path=/,socks5://10.0.0.1:1080"
+
+# Load from file (supports xray links too)
+iploop -proxy-file proxies.txt
+
+# Test the SOCKS5 listener
 curl --socks5 localhost:33333 https://icanhazip.com
 ```
 
-## Options
+## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-listen` | `:33333` | Listen address |
+| `-listen` | `:33333` | SOCKS5 listen address |
 | `-proxies` | | Comma-separated proxy list |
 | `-proxy-file` | | Proxy list file (one per line) |
-| `-strategy` | `sequential` | `random` or `sequential` |
-| `-skip-dead` | `false` | Skip failing proxies (default: keep using them) |
-| `-requests-per-proxy` | `1` | Requests per proxy before rotation (`auto` to stay until dead) |
-| `-trust-proxy` | `true` | Trust HTTPS proxy certificates (skip TLS verification) |
-| `-retry-delay` | `100` | Delay in ms between retries |
-| `-dial-timeout` | `5` | Timeout in seconds for proxy connections |
-| `-metrics` | `true` | Terminal metrics display |
-| `-v` | `false` | Verbose output |
+| `-strategy` | `sequential` | `sequential` or `random` |
+| `-skip-dead` | `false` | Skip dead proxies instead of retrying |
+| `-requests-per-proxy` | `1` | Requests before rotation (`auto` to stay while alive) |
+| `-retry-delay` | `100` | Retry delay in ms |
+| `-dial-timeout` | `5` | Dial timeout in seconds |
+| `-metrics` | `true` | Terminal metrics |
+| `-trust-proxy` | `true` | Skip TLS verification for HTTPS proxies |
+| `-v` | `false` | Verbose logging |
 
-### TLS Note
+## Supported inputs
 
-The `-trust-proxy` flag controls TLS verification when connecting to HTTPS proxy servers (e.g., `https://proxy:8080`). HTTP proxies don't use TLS for the proxy connection itself, so this flag doesn't apply to them. Destination TLS (e.g., when you curl an HTTPS site) is handled end-to-end by your client, not by iploop.
+- **HTTP** — `http://host:port`, `http://user:pass@host:port`
+- **HTTPS** — `https://host:port`
+- **SOCKS4** — `socks4://host:port`
+- **SOCKS5** — `socks5://host:port`
+- **Xray** — `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `wireguard://`, `wg://`
 
-## Supported Proxies
-
-- HTTP (`http://host:port`)
-- HTTPS (`https://host:port`)
-- SOCKS4 (`socks4://host:port`)
-- SOCKS5 (`socks5://host:port`)
-
-Authentication: `http://user:pass@host:port`
+Xray links require `xray` in PATH. Each link spawns an xray process with no logging, DNS through outbound, and a SOCKS5 inbound on a random port.
 
 ## License
 
