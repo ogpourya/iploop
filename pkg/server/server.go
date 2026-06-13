@@ -301,55 +301,42 @@ func (s *Server) connectToTarget(target string) (net.Conn, *proxy.Proxy, error) 
 	defer cancel()
 
 	maxRetries := 3
-	proxies := make([]*proxy.Proxy, 0, maxRetries)
-	tried := make(map[*proxy.Proxy]bool)
+	var lastErr error
 
 	for i := 0; i < maxRetries; i++ {
 		p, err := s.rotator.Next()
 		if err != nil {
+			if i == 0 {
+				return nil, nil, err
+			}
 			break
 		}
-		if tried[p] {
-			continue
-		}
-		tried[p] = true
-		proxies = append(proxies, p)
-	}
 
-	if len(proxies) == 0 {
-		return nil, nil, fmt.Errorf("no proxies available")
-	}
-
-	type result struct {
-		conn  net.Conn
-		proxy *proxy.Proxy
-		err   error
-	}
-
-	resultCh := make(chan result, len(proxies))
-
-	for _, p := range proxies {
-		go func(p *proxy.Proxy) {
-			conn, err := s.dialer.Dial(ctx, p, target)
-			resultCh <- result{conn, p, err}
-		}(p)
-	}
-
-	var lastErr error
-	for i := 0; i < len(proxies); i++ {
-		res := <-resultCh
-		if res.err == nil {
-			cancel()
-			if s.verbose {
-				fmt.Fprintf(os.Stderr, "Using proxy %s for %s\n", res.proxy, target)
-			}
-			return res.conn, res.proxy, nil
-		}
 		if s.verbose {
-			fmt.Fprintf(os.Stderr, "Failed to connect via proxy %s to %s: %v\n", res.proxy, target, res.err)
+			fmt.Fprintf(os.Stderr, "Trying proxy %s for %s (attempt %d/%d)\n", p, target, i+1, maxRetries)
 		}
-		lastErr = res.err
-		s.rotator.MarkDead(res.proxy)
+
+		conn, err := s.dialer.Dial(ctx, p, target)
+		if err == nil {
+			if s.verbose {
+				fmt.Fprintf(os.Stderr, "Using proxy %s for %s\n", p, target)
+			}
+			return conn, p, nil
+		}
+
+		if s.verbose {
+			fmt.Fprintf(os.Stderr, "Failed to connect via proxy %s to %s: %v\n", p, target, err)
+		}
+		lastErr = err
+		s.rotator.MarkDead(p)
+
+		if i < maxRetries-1 {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-time.After(s.retryDelay):
+			}
+		}
 	}
 
 	return nil, nil, lastErr
