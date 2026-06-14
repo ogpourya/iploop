@@ -46,9 +46,9 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error parsing xray link: %v\n", parseErr)
 				return
 			}
-			inst, startErr := xrayMgr.StartInstance(ob)
-			if startErr != nil {
-				fmt.Fprintf(os.Stderr, "Error starting xray instance: %v\n", startErr)
+			inst, addErr := xrayMgr.AddOutbound(ob)
+			if addErr != nil {
+				fmt.Fprintf(os.Stderr, "Error adding xray outbound: %v\n", addErr)
 				return
 			}
 			proxyURL := fmt.Sprintf("socks5://127.0.0.1:%d", inst.Port)
@@ -57,7 +57,6 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error creating proxy: %v\n", err)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
 		} else {
 			p, err = proxy.NewProxy(raw)
 			if err != nil {
@@ -91,6 +90,14 @@ func main() {
 	if rotator.Count() == 0 {
 		fmt.Fprintln(os.Stderr, "No proxies configured. Use -proxies or -proxy-file")
 		os.Exit(1)
+	}
+
+	if err := xrayMgr.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting xray: %v\n", err)
+		os.Exit(1)
+	}
+	for _, inst := range xrayMgr.Instances() {
+		fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
 	}
 
 	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.RetryDelay, cfg.DialTimeout, cfg.Verbose)

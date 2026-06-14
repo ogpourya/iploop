@@ -114,8 +114,9 @@ func TestConfigGeneration(t *testing.T) {
 		t.Fatalf("ParseLink failed: %v", err)
 	}
 
-	mgr := &Manager{}
-	config := mgr.buildConfig(ob, 55555)
+	config := buildConfig([]*entry{
+		{outbound: ob, port: 55555, tag: ob.Tag},
+	})
 
 	j, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

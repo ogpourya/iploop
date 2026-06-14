@@ -16,17 +16,22 @@ import (
 
 type Instance struct {
 	Port int
-	Cmd  *exec.Cmd
 	Tag  string
-	done chan struct{}
+}
+
+type entry struct {
+	outbound *XrayOutbound
+	port     int
+	tag      string
 }
 
 type Manager struct {
-	mu        sync.Mutex
-	once      sync.Once
-	instances []*Instance
-	binPath   string
-	tmpDir    string
+	mu      sync.Mutex
+	binPath string
+	tmpDir  string
+	entries []*entry
+	cmd     *exec.Cmd
+	done    chan struct{}
 }
 
 func NewManager() *Manager {
@@ -51,56 +56,63 @@ func (m *Manager) findXrayBin() (string, error) {
 	return "", fmt.Errorf("xray binary not found in PATH")
 }
 
-func (m *Manager) StartInstance(outbound *XrayOutbound) (*Instance, error) {
-	bin, err := m.findXrayBin()
+func (m *Manager) AddOutbound(ob *XrayOutbound) (*Instance, error) {
+	port, err := findFreePort()
 	if err != nil {
 		return nil, err
 	}
-
-	port, err := findFreePort()
-	if err != nil {
-		return nil, fmt.Errorf("find free port: %w", err)
-	}
-
-	config := m.buildConfig(outbound, port)
-
-	m.once.Do(func() {
-		m.tmpDir, err = os.MkdirTemp("", "iploop-xray-*")
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-
-	tag := outbound.Tag
+	tag := ob.Tag
 	if tag == "" {
 		tag = fmt.Sprintf("xray-%d", port)
 	}
-	slug := slugTag(tag)
-	configPath := filepath.Join(m.tmpDir, fmt.Sprintf("config-%s.json", slug))
+	m.mu.Lock()
+	m.entries = append(m.entries, &entry{outbound: ob, port: port, tag: tag})
+	m.mu.Unlock()
+	return &Instance{Port: port, Tag: tag}, nil
+}
+
+func (m *Manager) Start() error {
+	m.mu.Lock()
+	if len(m.entries) == 0 {
+		m.mu.Unlock()
+		return nil
+	}
+	entries := make([]*entry, len(m.entries))
+	copy(entries, m.entries)
+	m.mu.Unlock()
+
+	bin, err := m.findXrayBin()
+	if err != nil {
+		return err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "iploop-xray-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	config := buildConfig(entries)
 
 	configJSON, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("marshal config: %w", err)
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("marshal config: %w", err)
 	}
 	if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
-		return nil, fmt.Errorf("write config: %w", err)
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("write config: %w", err)
 	}
 
+	stderr := new(strings.Builder)
 	done := make(chan struct{})
-	inst := &Instance{
-		Port: port,
-		Tag:  tag,
-		done: done,
-	}
-
 	cmd := exec.Command(bin, "-c", configPath)
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-	inst.Cmd = cmd
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
-		os.Remove(configPath)
-		return nil, fmt.Errorf("start xray: %w", err)
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("start xray: %w", err)
 	}
 
 	go func() {
@@ -108,21 +120,93 @@ func (m *Manager) StartInstance(outbound *XrayOutbound) (*Instance, error) {
 		close(done)
 	}()
 
-	if err := waitForPort(port, 10*time.Second); err != nil {
+	ports := make([]int, len(entries))
+	for i, e := range entries {
+		ports[i] = e.port
+	}
+	if err := waitForPorts(ports, done, 30*time.Second); err != nil {
 		cmd.Process.Kill()
 		<-done
-		os.Remove(configPath)
-		return nil, fmt.Errorf("xray not listening on port %d: %w", port, err)
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%v\nxray stderr: %s", err, msg)
+		}
+		os.RemoveAll(tmpDir)
+		return err
 	}
 
 	m.mu.Lock()
-	m.instances = append(m.instances, inst)
+	m.tmpDir = tmpDir
+	m.cmd = cmd
+	m.done = done
 	m.mu.Unlock()
 
-	return inst, nil
+	return nil
 }
 
-func (m *Manager) buildConfig(outbound *XrayOutbound, socksPort int) map[string]any {
+func (m *Manager) Instances() []*Instance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*Instance, len(m.entries))
+	for i, e := range m.entries {
+		out[i] = &Instance{Port: e.port, Tag: e.tag}
+	}
+	return out
+}
+
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	cmd := m.cmd
+	done := m.done
+	tmpDir := m.tmpDir
+	m.mu.Unlock()
+
+	if cmd != nil && cmd.Process != nil {
+		cmd.Process.Kill()
+	}
+	if done != nil {
+		<-done
+	}
+	if tmpDir != "" {
+		os.RemoveAll(tmpDir)
+	}
+}
+
+func buildConfig(entries []*entry) map[string]any {
+	inbounds := make([]any, 0, len(entries))
+	outbounds := make([]any, 0, len(entries)+1)
+	rules := make([]any, 0, len(entries))
+
+	for _, e := range entries {
+		tag := fmt.Sprintf("%s-%d", slugTag(e.tag), e.port)
+		inbounds = append(inbounds, map[string]any{
+			"tag":      fmt.Sprintf("socks5-%s", tag),
+			"port":     e.port,
+			"listen":   "127.0.0.1",
+			"protocol": "socks",
+			"settings": map[string]any{
+				"udp":  true,
+				"auth": "noauth",
+			},
+			"sniffing": map[string]any{
+				"enabled":      true,
+				"destOverride": []string{"http", "tls"},
+			},
+		})
+
+		outbounds = append(outbounds, configToRaw(e.outbound, tag))
+
+		rules = append(rules, map[string]any{
+			"type":        "field",
+			"inboundTag":  []string{fmt.Sprintf("socks5-%s", tag)},
+			"outboundTag": tag,
+		})
+	}
+
+	outbounds = append(outbounds, map[string]any{
+		"protocol": "dns",
+		"tag":      "dns-outbound",
+	})
+
 	return map[string]any{
 		"log": map[string]any{
 			"loglevel": "none",
@@ -137,80 +221,25 @@ func (m *Manager) buildConfig(outbound *XrayOutbound, socksPort int) map[string]
 			"disableCache":  false,
 			"tag":           "dns-outbound",
 		},
-		"inbounds": []any{
-			map[string]any{
-				"tag":      fmt.Sprintf("socks5-%s", slugTag(outbound.Tag)),
-				"port":     socksPort,
-				"listen":   "127.0.0.1",
-				"protocol": "socks",
-				"settings": map[string]any{
-					"udp": true,
-					"auth": "noauth",
-				},
-				"sniffing": map[string]any{
-					"enabled":      true,
-					"destOverride": []string{"http", "tls"},
-				},
-			},
-		},
-		"outbounds": []any{
-			configToRaw(outbound),
-			map[string]any{
-				"protocol": "dns",
-				"tag":      "dns-outbound",
-			},
-		},
+		"inbounds":  inbounds,
+		"outbounds": outbounds,
 		"routing": map[string]any{
 			"domainStrategy": "IPOnDemand",
-			"rules": []any{
-				map[string]any{
-					"type":        "field",
-					"inboundTag":  []string{fmt.Sprintf("socks5-%s", slugTag(outbound.Tag))},
-					"outboundTag": slugTag(outbound.Tag),
-				},
-			},
+			"rules":          rules,
 		},
 	}
 }
 
-func configToRaw(ob *XrayOutbound) map[string]any {
+func configToRaw(ob *XrayOutbound, tag string) map[string]any {
 	raw := map[string]any{
 		"protocol": ob.Protocol,
-		"tag":      slugTag(ob.Tag),
+		"tag":      tag,
 		"settings": ob.Settings,
 	}
 	if ob.StreamSettings != nil {
 		raw["streamSettings"] = ob.StreamSettings
 	}
 	return raw
-}
-
-func (m *Manager) Instances() []*Instance {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]*Instance, len(m.instances))
-	copy(out, m.instances)
-	return out
-}
-
-func (m *Manager) StopAll() {
-	m.mu.Lock()
-	instances := make([]*Instance, len(m.instances))
-	copy(instances, m.instances)
-	m.instances = nil
-	m.mu.Unlock()
-
-	for _, inst := range instances {
-		if inst.Cmd != nil && inst.Cmd.Process != nil {
-			inst.Cmd.Process.Kill()
-		}
-	}
-	for _, inst := range instances {
-		<-inst.done
-	}
-	if m.tmpDir != "" {
-		os.RemoveAll(m.tmpDir)
-	}
 }
 
 func findFreePort() (int, error) {
@@ -231,21 +260,54 @@ func findFreePort() (int, error) {
 	return port, nil
 }
 
-func waitForPort(port int, timeout time.Duration) error {
+func waitForPorts(ports []int, done <-chan struct{}, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	delay := 50 * time.Millisecond
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), delay)
-		if err == nil {
-			conn.Close()
-			return nil
+	remaining := make(map[int]struct{})
+	for _, p := range ports {
+		remaining[p] = struct{}{}
+	}
+	var mu sync.Mutex
+	for len(remaining) > 0 {
+		select {
+		case <-done:
+			return fmt.Errorf("xray process exited unexpectedly")
+		default:
 		}
-		time.Sleep(delay)
-		if delay < 500*time.Millisecond {
-			delay *= 2
+		if time.Now().After(deadline) {
+			var unready []int
+			for p := range remaining {
+				unready = append(unready, p)
+			}
+			return fmt.Errorf("timeout waiting for ports: %v", unready)
+		}
+
+		mu.Lock()
+		check := make([]int, 0, len(remaining))
+		for p := range remaining {
+			check = append(check, p)
+		}
+		mu.Unlock()
+
+		var wg sync.WaitGroup
+		for _, port := range check {
+			wg.Add(1)
+			go func(port int) {
+				defer wg.Done()
+				conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 100*time.Millisecond)
+				if err == nil {
+					conn.Close()
+					mu.Lock()
+					delete(remaining, port)
+					mu.Unlock()
+				}
+			}(port)
+		}
+		wg.Wait()
+		if len(remaining) > 0 {
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	return fmt.Errorf("timeout waiting for port %d", port)
+	return nil
 }
 
 func slugTag(tag string) string {
