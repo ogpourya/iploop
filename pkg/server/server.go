@@ -54,11 +54,11 @@ type Server struct {
 	verbose    bool
 }
 
-func NewServer(rotator *proxy.Rotator, trustProxy bool, retryDelay int, dialTimeout int, verbose bool) *Server {
+func NewServer(rotator *proxy.Rotator, trustProxy bool, retryDelay int, dialTimeout int, verbose bool, noDNS bool) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		rotator:    rotator,
-		dialer:     NewDialer(trustProxy, time.Duration(dialTimeout)*time.Second, verbose),
+		dialer:     NewDialer(trustProxy, time.Duration(dialTimeout)*time.Second, verbose, noDNS),
 		stats:      &Stats{},
 		retryDelay: time.Duration(retryDelay) * time.Millisecond,
 		bufPool: sync.Pool{

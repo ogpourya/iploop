@@ -100,7 +100,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
 	}
 
-	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.RetryDelay, cfg.DialTimeout, cfg.Verbose)
+	srv := server.NewServer(rotator, cfg.TrustProxy, cfg.RetryDelay, cfg.DialTimeout, cfg.Verbose, cfg.NoDNS)
 	if err := srv.Listen(cfg.ListenAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)

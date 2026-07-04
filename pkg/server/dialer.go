@@ -21,13 +21,15 @@ type Dialer struct {
 	timeout    time.Duration
 	trustProxy bool
 	verbose    bool
+	noDNS      bool
 }
 
-func NewDialer(trustProxy bool, timeout time.Duration, verbose bool) *Dialer {
+func NewDialer(trustProxy bool, timeout time.Duration, verbose bool, noDNS bool) *Dialer {
 	return &Dialer{
 		timeout:    timeout,
 		trustProxy: trustProxy,
 		verbose:    verbose,
+		noDNS:      noDNS,
 	}
 }
 
@@ -100,6 +102,17 @@ func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (ne
 		fmt.Fprintf(os.Stderr, "Sending HTTP CONNECT to %s for %s\n", p.Address(), target)
 	}
 	start := time.Now()
+
+	if !d.noDNS {
+		host, port, err := net.SplitHostPort(target)
+		if err == nil {
+			if ip, err := d.resolveHost(host); err == nil {
+				target = net.JoinHostPort(ip.String(), port)
+			} else if d.verbose {
+				fmt.Fprintf(os.Stderr, "DNS resolution failed for %s: %v, falling back to hostname\n", host, err)
+			}
+		}
+	}
 
 	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
 	if p.Username != "" {
@@ -208,6 +221,18 @@ func (d *Dialer) dialSOCKS4(conn net.Conn, p *proxy.Proxy, target string) (net.C
 	return conn, nil
 }
 
+func (d *Dialer) resolveHost(host string) (net.IP, error) {
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip, nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("resolve failed: %s", host)
+	}
+	return ips[0], nil
+}
+
 func (d *Dialer) dialSOCKS5(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
 	conn.SetDeadline(time.Now().Add(d.timeout))
 
@@ -259,6 +284,14 @@ func (d *Dialer) dialSOCKS5(conn net.Conn, p *proxy.Proxy, target string) (net.C
 	if len(host) > 255 {
 		conn.Close()
 		return nil, fmt.Errorf("hostname too long")
+	}
+
+	if !d.noDNS {
+		if ip, err := d.resolveHost(host); err == nil {
+			host = ip.String()
+		} else if d.verbose {
+			fmt.Fprintf(os.Stderr, "DNS resolution failed for %s: %v, falling back to domain name\n", host, err)
+		}
 	}
 
 	req := make([]byte, 0, 22)

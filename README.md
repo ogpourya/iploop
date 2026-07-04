@@ -38,6 +38,7 @@ curl --socks5 localhost:33333 https://icanhazip.com
 | `-retry-delay` | `100` | Retry delay in ms |
 | `-dial-timeout` | `5` | Dial timeout in seconds |
 | `-metrics` | `true` | Terminal metrics |
+| `-no-dns` | `false` | Skip local DNS; pass hostnames as-is to upstream proxies |
 | `-trust-proxy` | `true` | Skip TLS verification for HTTPS proxies |
 | `-v` | `false` | Verbose logging |
 
