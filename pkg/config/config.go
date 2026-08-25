@@ -41,7 +41,7 @@ func Parse() *Config {
 	flag.IntVar(&cfg.DialTimeout, "dial-timeout", 5, "Timeout in seconds for proxy connections")
 	flag.BoolVar(&cfg.MetricsEnabled, "metrics", true, "Enable terminal metrics")
 	flag.BoolVar(&cfg.Verbose, "v", false, "Verbose logging")
-	flag.BoolVar(&cfg.NoDNS, "no-dns", false, "Skip local DNS resolution; pass hostnames as-is to upstream proxies")
+	flag.BoolVar(&cfg.NoDNS, "no-dns", true, "Skip local DNS resolution; pass hostnames as-is to upstream proxies")
 
 	flag.Parse()
 
