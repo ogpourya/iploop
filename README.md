@@ -50,7 +50,7 @@ curl --socks5 localhost:33333 https://icanhazip.com
 - **SOCKS5** — `socks5://host:port`
 - **Xray** — `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `wireguard://`, `wg://`
 
-Xray links require `xray` in PATH. Each link spawns an xray process with no logging, DNS through outbound, and a SOCKS5 inbound on a random port.
+Xray binary and geoip/geosite data are auto-downloaded from official repositories on first use if not found in `$PATH` or `~/.local/bin`. SHA256 checksums verified. Each link spawns an xray process with no logging, DNS through outbound, and a SOCKS5 inbound on a random port.
 
 ## License
 
