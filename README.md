@@ -3,7 +3,7 @@
 SOCKS5 proxy rotator. Feeds proxies through xray, HTTP, HTTPS, SOCKS4/5 — rotates them per request.
 
 ```
-go install github.com/ogpourya/iploop/cmd/iploop@latest
+GOPROXY=direct go install github.com/ogpourya/iploop/cmd/iploop@latest
 ```
 
 ## Examples
