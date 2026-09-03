@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
@@ -33,11 +34,12 @@ func (t ProxyType) String() string {
 }
 
 type Proxy struct {
-	Type     ProxyType
-	Host     string
-	Port     string
-	Username string
-	Password string
+	Type      ProxyType
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	ProxyAuth string // precomputed "Basic ..." header, empty when credless
 
 	requests  atomic.Int64
 	failures  atomic.Int64
@@ -70,6 +72,9 @@ func NewProxy(rawURL string) (*Proxy, error) {
 	if u.User != nil {
 		p.Username = u.User.Username()
 		p.Password, _ = u.User.Password()
+		if p.Username != "" {
+			p.ProxyAuth = "Basic " + base64.StdEncoding.EncodeToString([]byte(p.Username+":"+p.Password))
+		}
 	}
 
 	switch strings.ToLower(u.Scheme) {

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -22,24 +21,31 @@ type Dialer struct {
 	trustProxy bool
 	verbose    bool
 	noDNS      bool
+	dialer     *net.Dialer // safe for concurrent use; reused to avoid per-dial alloc
+	tlsBase    *tls.Config // shared session cache; cloned per dial for ServerName
 }
 
 func NewDialer(trustProxy bool, timeout time.Duration, verbose bool, noDNS bool) *Dialer {
-	return &Dialer{
+	d := &Dialer{
 		timeout:    timeout,
 		trustProxy: trustProxy,
 		verbose:    verbose,
 		noDNS:      noDNS,
+		dialer:     &net.Dialer{Timeout: timeout},
+		tlsBase: &tls.Config{
+			InsecureSkipVerify: trustProxy,
+			ClientSessionCache: tls.NewLRUClientSessionCache(128),
+		},
 	}
+	return d
 }
 
 func (d *Dialer) Dial(ctx context.Context, p *proxy.Proxy, target string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: d.timeout}
 	if d.verbose {
 		fmt.Fprintf(os.Stderr, "Dialing proxy (tcp) %s\n", p.Address())
 	}
 	start := time.Now()
-	conn, err := dialer.DialContext(ctx, "tcp", p.Address())
+	conn, err := d.dialer.DialContext(ctx, "tcp", p.Address())
 	if d.verbose {
 		fmt.Fprintf(os.Stderr, "Dial proxy (tcp) %s took %v (err=%v)\n", p.Address(), time.Since(start), err)
 	}
@@ -71,20 +77,9 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-func (d *Dialer) dialHTTP(p *proxy.Proxy, target string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: d.timeout}
-	conn, err := dialer.Dial("tcp", p.Address())
-	if err != nil {
-		return nil, err
-	}
-	return d.doHTTPConnect(conn, p, target)
-}
-
 func (d *Dialer) dialHTTPS(conn net.Conn, p *proxy.Proxy, target string) (net.Conn, error) {
-	tlsConfig := &tls.Config{
-		ServerName:         p.Host,
-		InsecureSkipVerify: d.trustProxy,
-	}
+	tlsConfig := d.tlsBase.Clone()
+	tlsConfig.ServerName = p.Host
 
 	tlsConn := tls.Client(conn, tlsConfig)
 	tlsConn.SetDeadline(time.Now().Add(d.timeout))
@@ -115,9 +110,8 @@ func (d *Dialer) doHTTPConnect(conn net.Conn, p *proxy.Proxy, target string) (ne
 	}
 
 	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
-	if p.Username != "" {
-		auth := base64.StdEncoding.EncodeToString([]byte(p.Username + ":" + p.Password))
-		req += "Proxy-Authorization: Basic " + auth + "\r\n"
+	if p.ProxyAuth != "" {
+		req += "Proxy-Authorization: " + p.ProxyAuth + "\r\n"
 	}
 	req += "\r\n"
 
@@ -294,7 +288,7 @@ func (d *Dialer) dialSOCKS5(conn net.Conn, p *proxy.Proxy, target string) (net.C
 		}
 	}
 
-	req := make([]byte, 0, 22)
+	req := make([]byte, 0, 7+len(host))
 	req = append(req, 0x05, 0x01, 0x00)
 
 	ip := net.ParseIP(host)
