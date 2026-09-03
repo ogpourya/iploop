@@ -129,8 +129,8 @@ func TestConfigGeneration(t *testing.T) {
 	}
 
 	log, ok := parsed["log"].(map[string]any)
-	if !ok || log["loglevel"] != "none" {
-		t.Fatal("expected log.none")
+	if !ok || log["loglevel"] != "warning" {
+		t.Fatal("expected log.warning")
 	}
 
 	inbounds, ok := parsed["inbounds"].([]any)
