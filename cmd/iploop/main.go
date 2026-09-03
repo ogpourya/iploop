@@ -65,8 +65,9 @@ func readLines(path string) ([]string, error) {
 
 // startXrayManager builds a manager for the given xray links, starts it,
 // and returns the local SOCKS5 proxies fronting each instance.
-func startXrayManager(links []string) (*xray.Manager, []*proxy.Proxy, error) {
+func startXrayManager(links []string, verbose bool) (*xray.Manager, []*proxy.Proxy, error) {
 	mgr := xray.NewManager()
+	mgr.Verbose = verbose
 	for _, link := range links {
 		ob, err := xray.ParseLink(link)
 		if err != nil {
@@ -111,7 +112,7 @@ func xraySetEqual(a, b []string) bool {
 // watchProxyFile polls path and hot-reloads the proxy set on change.
 // Plain proxies swap in place; xray restarts only when xray links changed.
 // On any failure the current set is kept.
-func watchProxyFile(path string, rotator *proxy.Rotator, mgr *atomic.Pointer[xray.Manager], flagPlain []*proxy.Proxy, flagXray, fileXray []string, locals []*proxy.Proxy) {
+func watchProxyFile(path string, rotator *proxy.Rotator, mgr *atomic.Pointer[xray.Manager], flagPlain []*proxy.Proxy, flagXray, fileXray []string, locals []*proxy.Proxy, verbose bool) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return
@@ -155,7 +156,7 @@ func watchProxyFile(path string, rotator *proxy.Rotator, mgr *atomic.Pointer[xra
 			fmt.Fprintf(os.Stderr, "proxy file reloaded: %d proxies\n", rotator.Count())
 			continue
 		}
-		newMgr, newLocals, err := startXrayManager(append(append([]string{}, flagXray...), newXray...))
+		newMgr, newLocals, err := startXrayManager(append(append([]string{}, flagXray...), newXray...), verbose)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "proxy file reload: xray restart failed: %v (keeping current proxies)\n", err)
 			continue
@@ -224,7 +225,7 @@ func main() {
 		}
 	}
 
-	mgr, locals, err := startXrayManager(append(append([]string{}, flagXray...), fileXray...))
+	mgr, locals, err := startXrayManager(append(append([]string{}, flagXray...), fileXray...), cfg.Verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting xray: %v\n", err)
 		os.Exit(1)
@@ -253,7 +254,7 @@ func main() {
 		srv.Addr(), rotator.Count(), cfg.Strategy)
 
 	if cfg.ProxyFile != "" {
-		go watchProxyFile(cfg.ProxyFile, rotator, &xrayMgr, flagPlain, flagXray, fileXray, locals)
+		go watchProxyFile(cfg.ProxyFile, rotator, &xrayMgr, flagPlain, flagXray, fileXray, locals, cfg.Verbose)
 	}
 
 	var display *metrics.Display
