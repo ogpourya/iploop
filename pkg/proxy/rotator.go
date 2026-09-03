@@ -209,3 +209,34 @@ func (r *Rotator) MarkDead(p *Proxy) {
 	}
 	r.mu.Unlock()
 }
+
+// ReplaceAll swaps the proxy set in place, keeping stats/alive state for
+// survivors (matched by address). Callers keep using the same Rotator.
+func (r *Rotator) ReplaceAll(proxies []*Proxy) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old := make(map[string]*Proxy, len(r.proxies))
+	for _, p := range r.proxies {
+		old[p.String()] = p
+	}
+	r.seen = make(map[string]bool, len(proxies))
+	r.proxies = r.proxies[:0]
+	for _, p := range proxies {
+		key := p.String()
+		if r.seen[key] {
+			continue
+		}
+		r.seen[key] = true
+		if o, ok := old[key]; ok {
+			p = o
+		}
+		r.proxies = append(r.proxies, p)
+	}
+	r.poolCache = r.poolCache[:0]
+	r.shuffled = nil
+	r.seqIndex = 0
+	if r.current != nil && !r.seen[r.current.String()] {
+		r.current = nil
+		r.counter = 0
+	}
+}

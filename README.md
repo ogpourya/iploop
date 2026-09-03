@@ -31,7 +31,7 @@ curl --socks5 localhost:33333 https://icanhazip.com
 |------|---------|-------------|
 | `-listen` | `:33333` | SOCKS5 listen address |
 | `-proxies` | | Comma-separated proxy list |
-| `-proxy-file` | | Proxy list file (one per line) |
+| `-proxy-file` | | Proxy list file (one per line, watched and hot-reloaded) |
 | `-strategy` | `sequential` | `sequential` or `random` |
 | `-skip-dead` | `false` | Skip dead proxies instead of retrying |
 | `-requests-per-proxy` | `1` | Requests before rotation (`auto` to stay while alive) |
