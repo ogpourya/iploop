@@ -164,8 +164,10 @@ func watchProxyFile(path string, rotator *proxy.Rotator, mgr *atomic.Pointer[xra
 		old := mgr.Swap(newMgr)
 		fileXray, locals = newXray, newLocals
 		rotator.ReplaceAll(joinProxies(flagPlain, newPlain, locals))
-		for _, inst := range newMgr.Instances() {
-			fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
+		if verbose {
+			for _, inst := range newMgr.Instances() {
+				fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "proxy file reloaded: %d proxies\n", rotator.Count())
 		if old != nil {
@@ -231,8 +233,10 @@ func main() {
 		os.Exit(1)
 	}
 	xrayMgr.Store(mgr)
-	for _, inst := range mgr.Instances() {
-		fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
+	if cfg.Verbose {
+		for _, inst := range mgr.Instances() {
+			fmt.Fprintf(os.Stderr, "Started xray proxy '%s' on SOCKS5 127.0.0.1:%d\n", inst.Tag, inst.Port)
+		}
 	}
 	for _, p := range joinProxies(flagPlain, filePlain, locals) {
 		rotator.AddProxy(p)
