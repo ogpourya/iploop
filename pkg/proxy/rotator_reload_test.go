@@ -40,3 +40,25 @@ func TestReplaceAll(t *testing.T) {
 		}
 	}
 }
+
+func TestSkipDeadPool(t *testing.T) {
+	r := NewRotator(RotationSequential, true, 1)
+	a := mustProxy(t, "socks5://1.1.1.1:1080")
+	b := mustProxy(t, "socks5://2.2.2.2:1080")
+	r.AddProxy(a)
+	r.AddProxy(b)
+	r.MarkDead(a)
+	for i := 0; i < 10; i++ {
+		p, err := r.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p != b {
+			t.Fatalf("Next returned dead proxy %s", p)
+		}
+	}
+	r.MarkDead(b)
+	if _, err := r.Next(); err != ErrAllProxiesDead {
+		t.Fatalf("Next err = %v, want ErrAllProxiesDead", err)
+	}
+}

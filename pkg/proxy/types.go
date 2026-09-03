@@ -40,6 +40,7 @@ type Proxy struct {
 	Username  string
 	Password  string
 	ProxyAuth string // precomputed "Basic ..." header, empty when credless
+	addr      string // precomputed "host:port", see Address
 
 	requests  atomic.Int64
 	failures  atomic.Int64
@@ -101,12 +102,13 @@ func NewProxy(rawURL string) (*Proxy, error) {
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", u.Scheme)
 	}
+	p.addr = host + ":" + p.Port
 
 	return p, nil
 }
 
 func (p *Proxy) Address() string {
-	return p.Host + ":" + p.Port
+	return p.addr
 }
 
 func (p *Proxy) String() string {

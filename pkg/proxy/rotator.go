@@ -46,6 +46,7 @@ type Rotator struct {
 	shuffled    []*Proxy
 	shuffleIdx  int
 	poolCache   []*Proxy
+	poolDirty   bool // set when membership/liveness changes; getPool rebuilds once
 }
 
 func NewRotator(strategy RotationStrategy, skipDead bool, requestsPer int) *Rotator {
@@ -56,6 +57,7 @@ func NewRotator(strategy RotationStrategy, skipDead bool, requestsPer int) *Rota
 		skipDead:    skipDead,
 		requestsPer: requestsPer,
 		poolCache:   make([]*Proxy, 0, 64),
+		poolDirty:   true,
 	}
 }
 
@@ -69,6 +71,7 @@ func (r *Rotator) AddProxy(p *Proxy) {
 	r.seen[key] = true
 	r.proxies = append(r.proxies, p)
 	r.poolCache = r.poolCache[:0]
+	r.poolDirty = true
 	r.shuffled = nil
 	r.mu.Unlock()
 }
@@ -131,6 +134,9 @@ func (r *Rotator) getPool() ([]*Proxy, error) {
 	if !r.skipDead {
 		return r.proxies, nil
 	}
+	if !r.poolDirty {
+		return r.poolCache, nil
+	}
 
 	r.poolCache = r.poolCache[:0]
 	for _, p := range r.proxies {
@@ -138,6 +144,7 @@ func (r *Rotator) getPool() ([]*Proxy, error) {
 			r.poolCache = append(r.poolCache, p)
 		}
 	}
+	r.poolDirty = false
 
 	if len(r.poolCache) == 0 {
 		return nil, ErrAllProxiesDead
@@ -206,6 +213,7 @@ func (r *Rotator) MarkDead(p *Proxy) {
 	if r.skipDead {
 		r.shuffled = nil
 		r.poolCache = r.poolCache[:0]
+		r.poolDirty = true
 	}
 	r.mu.Unlock()
 }
@@ -233,6 +241,7 @@ func (r *Rotator) ReplaceAll(proxies []*Proxy) {
 		r.proxies = append(r.proxies, p)
 	}
 	r.poolCache = r.poolCache[:0]
+	r.poolDirty = true
 	r.shuffled = nil
 	r.seqIndex = 0
 	if r.current != nil && !r.seen[r.current.String()] {

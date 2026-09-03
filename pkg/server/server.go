@@ -91,7 +91,10 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) Listen(addr string) error {
-	lc := net.ListenConfig{Control: setSocketOptions}
+	lc := net.ListenConfig{
+		Control:   setSocketOptions,
+		KeepAlive: 60 * time.Second, // reap half-open client conns in minutes, not hours
+	}
 	var err error
 	s.listener, err = lc.Listen(s.ctx, "tcp", addr)
 	if err != nil {
@@ -107,6 +110,8 @@ func (s *Server) Serve() error {
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
+			// Back off: transient errors (e.g. EMFILE) would otherwise spin at 100% CPU.
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		s.stats.ActiveConns.Add(1)
