@@ -187,8 +187,21 @@ func joinProxies(groups ...[]*proxy.Proxy) []*proxy.Proxy {
 func main() {
 	cfg := config.Parse()
 
-	rotator := proxy.NewRotator(cfg.Strategy, cfg.SkipDead, cfg.RequestsPer)
 	var xrayMgr atomic.Pointer[xray.Manager]
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		if cfg.MetricsEnabled {
+			fmt.Print("\033[?25h\n")
+		}
+		if m := xrayMgr.Load(); m != nil {
+			m.StopAll()
+		}
+		os.Exit(130)
+	}()
+
+	rotator := proxy.NewRotator(cfg.Strategy, cfg.SkipDead, cfg.RequestsPer)
 
 	var flagPlain []*proxy.Proxy
 	var flagXray []string
@@ -261,7 +274,6 @@ func main() {
 		go watchProxyFile(cfg.ProxyFile, rotator, &xrayMgr, flagPlain, flagXray, fileXray, locals, cfg.Verbose)
 	}
 
-	var display *metrics.Display
 	if cfg.MetricsEnabled {
 		onAllDead := func() {
 			if cfg.SkipDead {
@@ -271,17 +283,9 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		display = metrics.NewDisplay(rotator, srv.Stats(), onAllDead)
+		display := metrics.NewDisplay(rotator, srv.Stats(), onAllDead)
 		display.Start()
 	}
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	<-sigCh
-	if display != nil {
-		display.Stop()
-	}
-	srv.Close()
-	xrayMgr.Load().StopAll()
+	select {}
 }
